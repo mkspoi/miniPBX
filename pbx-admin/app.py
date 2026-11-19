@@ -5,9 +5,17 @@ import json, re, subprocess, html, os, datetime, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
-CFG = json.load(open('/opt/pbx-admin/config.json'))
+def load_cfg():
+    try:
+        return json.load(open('/opt/pbx-admin/config.json'))
+    except Exception:
+        return {'admin_user': 'admin', 'admin_password': '', 'listen_host': '127.0.0.1', 'listen_port': 8090, 'sip_port': 21967, 'extension': '', 'extension_password': '', 'server_ip': '', 'server_host': ''}
+CFG = load_cfg()
 STATE_FILE = '/opt/pbx-admin/trunk.json'
 TRUNK_FILE = '/etc/asterisk/pjsip_trunk.conf'
+PHONES_FILE = '/etc/asterisk/pjsip_phones.conf'
+PJSIP_FILE = '/etc/asterisk/pjsip.conf'
+EXTENSIONS_FILE = '/etc/asterisk/extensions.conf'
 REC_DIR = '/var/spool/asterisk/monitor'
 AST_TIMEOUT = 30
 FAILS_FILE = '/opt/pbx-admin/auth_fails.json'
@@ -76,6 +84,36 @@ expiration=120
 type=identify
 endpoint=trunk
 match=37.139.38.0/24
+'''
+
+def phones_conf(cfg):
+    return f'''; Управляется админ-панелью — вручную не править
+[{cfg['extension']}]
+type=endpoint
+context=from-internal
+transport=transport-udp
+disallow=all
+allow=alaw
+auth={cfg['extension']}
+aors={cfg['extension']}
+direct_media=no
+rtp_symmetric=yes
+force_rport=yes
+rewrite_contact=yes
+dtmf_mode=rfc4733
+
+[{cfg['extension']}]
+type=auth
+auth_type=digest
+username={cfg['extension']}
+password={cfg['extension_password']}
+
+[{cfg['extension']}]
+type=aor
+max_contacts=2
+remove_existing=yes
+qualify_frequency=45
+qualify_timeout=3
 '''
 
 TRUNK_OFF = '''; Транк ОТКЛЮЧЁН в админ-панели pbx.example.com
@@ -204,6 +242,33 @@ __TOGGLE__
 <tr><td>Пароль</td><td><code>__EXTPWD__</code></td></tr>
 <tr><td>Кодеки</td><td>alaw, ulaw, gsm</td></tr>
 </table></div>
+<h2>Настройки (можно менять здесь)</h2>
+<div class="card">
+<form method="post" action="/settings">
+<label>Имя пользователя SIP / внутренний номер</label>
+<input name="extension" value="__EXTSET__" required>
+<label>Пароль SIP-аккаунта</label>
+<input name="extension_password" value="__EXTPWDSET__" required>
+<label>SIP-порт (UDP; при смене АТС перезапустится, откроется порт в файрволе)</label>
+<input name="sip_port" value="__PORTSET__" required>
+<label>Логин админки</label>
+<input name="admin_user" value="__USERSET__" required>
+<label>Новый пароль админки (пусто = не менять)</label>
+<input name="admin_password" type="password" placeholder="оставьте пустым, чтобы не менять">
+<button type="submit">Сохранить настройки</button>
+</form>
+<p style="color:#9aa7b2;font-size:13px;margin-bottom:0">После смены логина/пароля/порта перенастройте софтфон новыми значениями. Кодек: только ALAW.</p>
+</div>
+<h2>Отключение админки</h2>
+<div class="card">
+<p>Поставив галочку и нажав кнопку, вы полностью отключите эту панель: сайт начнёт отдавать 404,
+как будто его не существует. Включить обратно можно будет только на сервере командой
+<code>/opt/pbx-admin/adminctl.sh on</code> (АТС и звонки продолжат работать).</p>
+<form method="post" action="/disable" onsubmit="return confirm('Точно отключить админку? Включить обратно можно будет только через SSH на сервере!');">
+<label><input type="checkbox" name="sure" value="1" required style="width:auto"> Да, отключить админку навсегда (до ручного включения)</label>
+<button class="danger" type="submit">Отключить админку</button>
+</form>
+</div>
 <h2>Статус</h2>
 <div class="card"><pre>__STATUS__</pre></div>
 <h2>Записи разговоров</h2>
@@ -245,7 +310,8 @@ class H(BaseHTTPRequestHandler):
         if h.startswith('Basic '):
             try:
                 u, p = base64.b64decode(h.split()[1]).decode().split(':', 1)
-                if u == CFG['admin_user'] and p == CFG['admin_password']:
+                cfg_now = load_cfg()
+                if u == cfg_now['admin_user'] and p == cfg_now['admin_password']:
                     ok = True
             except Exception:
                 pass
@@ -275,6 +341,7 @@ class H(BaseHTTPRequestHandler):
 
     def render(self, msg=''):
         st = load_state()
+        cfg = load_cfg()
         status = ast('pjsip show registrations') + '\n' + ast('pjsip show contacts')
         if st.get('enabled'):
             state = '<span class="st-on">● Транк включён</span>'
@@ -292,10 +359,14 @@ class H(BaseHTTPRequestHandler):
                     .replace('__STATE__', state).replace('__TOGGLE__', toggle)
                     .replace('__HOST__', esc(st.get('host', ''))).replace('__USER__', esc(st.get('username', '')))
                     .replace('__PWD__', esc(st.get('password', '')))
-                    .replace('__SERVER__', esc(CFG['server_host'])).replace('__IP__', esc(CFG['server_ip']))
-                    .replace('__PORT__', str(CFG['sip_port'])).replace('__EXT__', esc(CFG['extension']))
-                    .replace('__EXTPWD__', esc(CFG['extension_password']))
+                    .replace('__SERVER__', esc(cfg['server_host'])).replace('__IP__', esc(cfg['server_ip']))
+                    .replace('__PORT__', str(cfg['sip_port'])).replace('__EXT__', esc(cfg['extension']))
+                    .replace('__EXTPWD__', esc(cfg['extension_password']))
                     .replace('__STATUS__', esc(status))
+                    .replace('__EXTSET__', esc(cfg.get('extension', '')))
+                    .replace('__EXTPWDSET__', esc(cfg.get('extension_password', '')))
+                    .replace('__PORTSET__', str(cfg.get('sip_port', '')))
+                    .replace('__USERSET__', esc(cfg.get('admin_user', '')))
                     .replace('__RECS__', recs_html))
         body = page.encode()
         self.send_response(200)
@@ -369,6 +440,55 @@ class H(BaseHTTPRequestHandler):
                 self.render('<div class="msg ok">Транк включён, настройки восстановлены, Asterisk перезагружен.</div>')
             else:
                 self.render()
+        elif self.path == '/settings':
+            ext = (q.get('extension', [''])[0]).strip()
+            extpwd = (q.get('extension_password', [''])[0]).strip()
+            port = (q.get('sip_port', [''])[0]).strip()
+            auser = (q.get('admin_user', [''])[0]).strip()
+            apwd = (q.get('admin_password', [''])[0]).strip()
+            if not re.fullmatch(r'[A-Za-z0-9_\-]{2,32}', ext or ''):
+                self.render('<div class="msg bad">Имя SIP-пользователя: 2-32 символа, латиница/цифры/_-.</div>'); return
+            if not extpwd or ' ' in extpwd:
+                self.render('<div class="msg bad">Пароль SIP обязателен и без пробелов.</div>'); return
+            if not port.isdigit() or not (1024 <= int(port) <= 65535):
+                self.render('<div class="msg bad">Порт: число 1024-65535.</div>'); return
+            if not re.fullmatch(r'[A-Za-z0-9_\-]{2,32}', auser or ''):
+                self.render('<div class="msg bad">Логин админки: 2-32 символа.</div>'); return
+            cfg = load_cfg()
+            old_port = str(cfg.get('sip_port'))
+            old_ext = cfg.get('extension')
+            cfg['extension'] = ext
+            cfg['extension_password'] = extpwd
+            cfg['sip_port'] = int(port)
+            cfg['admin_user'] = auser
+            if apwd:
+                cfg['admin_password'] = apwd
+            json.dump(cfg, open('/opt/pbx-admin/config.json', 'w'), ensure_ascii=False, indent=1)
+            # телефон
+            open(PHONES_FILE, 'w', encoding='utf-8').write(phones_conf(cfg))
+            if old_ext != ext:
+                import subprocess as sp
+                t = open(EXTENSIONS_FILE, encoding='utf-8').read().replace(old_ext, ext)
+                open(EXTENSIONS_FILE, 'w', encoding='utf-8').write(t)
+                ast('dialplan reload')
+            ast('pjsip reload')
+            extra = ''
+            if port != old_port:
+                import subprocess as sp
+                t = open(PJSIP_FILE, encoding='utf-8').read().replace(old_port, port)
+                open(PJSIP_FILE, 'w', encoding='utf-8').write(t)
+                try:
+                    sp.run(['ufw', 'allow', port + '/udp'], capture_output=True, timeout=30)
+                except Exception:
+                    pass
+                sp.run(['systemctl', 'restart', 'asterisk'], capture_output=True, timeout=90)
+                extra = ' Порт изменён: sip перезапущен, порт ' + port + ' открыт в файрволе. Старый порт ' + old_port + ' тоже пока открыт.'
+            self.render('<div class="msg ok">Настройки сохранены. Настройте софтфон: сервер тот же, порт ' + port + ', логин ' + ext + '.' + extra + '</div>')
+        elif self.path == '/disable':
+            if q.get('sure', [''])[0] != '1':
+                self.render(); return
+            open(SETTINGS_FILE, 'w').write('{"admin_enabled": false}')
+            self.render('<div class="msg ok">Админка отключена. Это последний ответ. Включить обратно: /opt/pbx-admin/adminctl.sh on (по SSH на сервере). АТС продолжает работать.</div>')
         else:
             self.send_response(404); self.end_headers()
 
