@@ -93,7 +93,8 @@ ufw allow "$RTP_START:$RTP_END/udp"
 yes | ufw enable >/dev/null 2>&1 || true
 
 echo "== 6/7. nginx (админка на скрытом пути /root/)..."
-sed "s/pbx.example.com/${DOMAIN:-_}/g" "$REPO_DIR/nginx/pbx-nossl.conf" > /etc/nginx/sites-available/pbx.conf
+install -m 644 "$REPO_DIR/nginx/pbx404.html" /var/www/pbx404.html
+  sed "s/pbx.example.com/${DOMAIN:-_}/g" "$REPO_DIR/nginx/pbx-nossl.conf" > /etc/nginx/sites-available/pbx.conf
 ln -sf /etc/nginx/sites-available/pbx.conf /etc/nginx/sites-enabled/pbx.conf
 rm -f /etc/nginx/sites-enabled/default
 nginx -t >/dev/null && systemctl reload nginx
