@@ -79,6 +79,8 @@ cat > /opt/pbx-admin/config.json <<EOF
 }
 EOF
 install -m 644 "$REPO_DIR/pbx-admin/pbx-admin.service" /etc/systemd/system/pbx-admin.service
+printf '{"admin_enabled": true}' > /opt/pbx-admin/settings.json
+install -m 700 "$REPO_DIR/pbx-admin/adminctl.sh" /opt/pbx-admin/adminctl.sh
 systemctl daemon-reload
 systemctl enable --now asterisk pbx-admin
 

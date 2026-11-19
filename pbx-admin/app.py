@@ -12,7 +12,9 @@ REC_DIR = '/var/spool/asterisk/monitor'
 AST_TIMEOUT = 30
 FAILS_FILE = '/opt/pbx-admin/auth_fails.json'
 MAX_FAILS = 3
+AST_TIMEOUT = 30
 BAN_SECS = 1800
+SETTINGS_FILE = '/opt/pbx-admin/settings.json'
 
 def load_state():
     try:
@@ -138,6 +140,16 @@ def save_fails(d):
         json.dump(d, open(FAILS_FILE, 'w'))
     except Exception:
         pass
+
+def load_settings():
+    try:
+        return json.load(open(SETTINGS_FILE))
+    except Exception:
+        return {}
+
+def admin_enabled():
+    # выключатель админки: {"admin_enabled": false} в settings.json — сайт отдаёт 404
+    return load_settings().get('admin_enabled', True)
 
 PAGE = '''<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -293,6 +305,12 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        if not admin_enabled():
+            self.send_response(404)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(b'Not Found')
+            return
         if not self.do_auth():
             return
         if self.path.startswith('/rec?'):
@@ -314,6 +332,12 @@ class H(BaseHTTPRequestHandler):
         self.render()
 
     def do_POST(self):
+        if not admin_enabled():
+            self.send_response(404)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(b'Not Found')
+            return
         if not self.do_auth():
             return
         n = int(self.headers.get('Content-Length', 0))
