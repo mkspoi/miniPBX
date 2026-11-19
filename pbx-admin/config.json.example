@@ -1,0 +1,11 @@
+{
+  "admin_user": "admin",
+  "admin_password": "CHANGE_ME_ADMIN_PASSWORD",
+  "listen_host": "127.0.0.1",
+  "listen_port": 8090,
+  "sip_port": 21967,
+  "extension": "masterlab1245",
+  "extension_password": "CHANGE_ME_SIP_PASSWORD",
+  "server_ip": "203.0.113.10",
+  "server_host": "pbx.example.com"
+}

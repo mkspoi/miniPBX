@@ -1,0 +1,27 @@
+; Внутренний номер masterlab1245 — телефон finn
+[masterlab1245]
+type=endpoint
+context=from-internal
+transport=transport-udp
+disallow=all
+allow=alaw
+auth=masterlab1245
+aors=masterlab1245
+direct_media=no
+rtp_symmetric=yes
+force_rport=yes
+rewrite_contact=yes
+dtmf_mode=rfc4733
+
+[masterlab1245]
+type=auth
+auth_type=digest
+username=masterlab1245
+password=CHANGE_ME_SIP_PASSWORD
+
+[masterlab1245]
+type=aor
+max_contacts=2
+remove_existing=yes
+qualify_frequency=45
+qualify_timeout=3
